@@ -1,0 +1,171 @@
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chess AI Analyzer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+<style>
+body{background:#111827;color:white;font-family:Arial;text-align:center;padding:15px}
+h1{color:#60a5fa}
+textarea,input{width:95%;box-sizing:border-box;background:#1f2937;color:white;border:1px solid #475569;border-radius:9px;padding:12px;margin:7px 0}
+button{background:#2563eb;color:white;border:0;border-radius:9px;padding:13px;margin:7px;font-size:16px}
+#board{display:grid;grid-template-columns:repeat(8,1fr);width:min(90vw,400px);margin:20px auto}
+.cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:clamp(24px,8vw,43px)}
+.light{background:#f0d9b5;color:#111}
+.dark{background:#b58863;color:#111}
+#result{background:#1f2937;padding:15px;border-radius:12px;margin-top:15px;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<h1>♟ Chess AI Analyzer</h1>
+<p>Analizza le tue partite con Stockfish</p>
+
+<textarea id="pgn" rows="5" placeholder="Incolla qui il PGN della tua partita (facoltativo)"></textarea>
+<input id="fen" placeholder="Oppure inserisci una posizione FEN (facoltativo)">
+
+<button onclick="loadPosition()">Carica posizione</button>
+<button onclick="analyze()">Analizza con Stockfish</button>
+
+<div id="board"></div>
+
+<div id="result">
+<p>Motore: in attesa</p>
+<p>Carica una posizione per iniziare.</p>
+</div>
+
+<script>
+const game = new Chess();
+const pieces = {
+wK:"♔",wQ:"♕",wR:"♖",wB:"♗",wN:"♘",wP:"♙",
+bK:"♚",bQ:"♛",bR:"♜",bB:"♝",bN:"♞",bP:"♟"
+};
+
+let engine=null;
+let ready=false;
+let searching=false;
+let latestBest="";
+let latestEval="";
+
+function drawBoard(){
+ const board=document.getElementById("board");
+ board.innerHTML="";
+ const position=game.board();
+
+ position.forEach((row,r)=>{
+  row.forEach((piece,c)=>{
+   const cell=document.createElement("div");
+   cell.className="cell "+((r+c)%2===0?"light":"dark");
+   if(piece) cell.textContent=pieces[piece.color+piece.type.toUpperCase()];
+   board.appendChild(cell);
+  });
+ });
+}
+
+function loadPosition(){
+ const fen=document.getElementById("fen").value.trim();
+ const pgn=document.getElementById("pgn").value.trim();
+
+ let success=false;
+
+ if(fen){
+  success=game.load(fen);
+ }else if(pgn){
+  success=game.load_pgn(pgn);
+ }else{
+  game.reset();
+  success=true;
+ }
+
+ if(!success){
+  alert("FEN o PGN non valido.");
+  return;
+ }
+
+ drawBoard();
+ document.getElementById("result").innerHTML=
+ "Posizione caricata. Premi Analizza con Stockfish.";
+}
+
+function startEngine(){
+ if(engine)return;
+
+ const url="https://cdn.jsdelivr.net/npm/stockfish@19.0.1/bin/stockfish-19-lite-single.js";
+
+ try{
+  engine=new Worker(url);
+  engine.onmessage=function(event){
+   const msg=String(event.data);
+
+   if(msg==="uciok"){
+    engine.postMessage("isready");
+   }
+
+   if(msg==="readyok"){
+    ready=true;
+    document.getElementById("result").innerHTML=
+    "Stockfish pronto! Premi Analizza con Stockfish.";
+   }
+
+   if(msg.startsWith("info")){
+    const depth=msg.match(/depth (\d+)/);
+    const cp=msg.match(/score cp (-?\d+)/);
+    const mate=msg.match(/score mate (-?\d+)/);
+    const pv=msg.match(/ pv (.+)/);
+
+    if(cp) latestEval=(Number(cp[1])/100).toFixed(2);
+    if(mate) latestEval="Matto in "+mate[1];
+
+    document.getElementById("result").innerHTML=
+    "<b>Analisi Stockfish</b><br>"+
+    "Profondità: "+(depth?depth[1]:"...")+"<br>"+
+    "Valutazione: "+(latestEval||"Calcolo...")+"<br>"+
+    "Varianti: "+(pv?pv[1]:"Calcolo...")+"<br>"+
+    "Ricerca in corso...";
+   }
+
+   if(msg.startsWith("bestmove")){
+    latestBest=msg.split(" ")[1];
+    searching=false;
+
+    document.getElementById("result").innerHTML+=
+    "<hr><b>Migliore mossa:</b> "+latestBest+
+    "<br>Analisi completata.";
+   }
+  };
+
+  engine.onerror=function(){
+   document.getElementById("result").textContent=
+   "Errore nel caricamento di Stockfish. Riprova.";
+  };
+
+  engine.postMessage("uci");
+ }catch(e){
+  document.getElementById("result").textContent=
+  "Impossibile avviare il motore.";
+ }
+}
+
+function analyze(){
+ if(searching)return;
+
+ if(!ready){
+  startEngine();
+  document.getElementById("result").textContent=
+  "Caricamento Stockfish... attendi qualche secondo e riprova.";
+  return;
+ }
+
+ searching=true;
+ latestBest="";
+ latestEval="";
+
+ engine.postMessage("position fen "+game.fen());
+ engine.postMessage("go depth 15");
+}
+
+loadPosition();
+</script>
+</body>
+</html>
